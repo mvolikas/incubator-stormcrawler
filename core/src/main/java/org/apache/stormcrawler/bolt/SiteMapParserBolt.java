@@ -18,30 +18,13 @@ package org.apache.stormcrawler.bolt;
 
 import static org.apache.stormcrawler.Constants.StatusStreamName;
 
-import com.google.common.primitives.Bytes;
-import crawlercommons.sitemaps.AbstractSiteMap;
-import crawlercommons.sitemaps.Namespace;
-import crawlercommons.sitemaps.SiteMap;
-import crawlercommons.sitemaps.SiteMapIndex;
-import crawlercommons.sitemaps.SiteMapParser;
-import crawlercommons.sitemaps.SiteMapURL;
+import crawlercommons.sitemaps.*;
 import crawlercommons.sitemaps.SiteMapURL.ChangeFrequency;
-import crawlercommons.sitemaps.UnknownFormatException;
 import crawlercommons.sitemaps.extension.Extension;
 import crawlercommons.sitemaps.extension.ExtensionMetadata;
 import java.io.IOException;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Calendar;
-import java.util.Collection;
-import java.util.Date;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.TimeZone;
+import java.util.*;
 import org.apache.commons.lang.StringUtils;
 import org.apache.storm.metric.api.MeanReducer;
 import org.apache.storm.metric.api.ReducedMetric;
@@ -61,6 +44,7 @@ import org.apache.stormcrawler.persistence.DefaultScheduler;
 import org.apache.stormcrawler.persistence.Status;
 import org.apache.stormcrawler.protocol.HttpHeaders;
 import org.apache.stormcrawler.util.ConfUtils;
+import org.apache.stormcrawler.util.SitemapUtil;
 import org.slf4j.LoggerFactory;
 
 /**
@@ -76,14 +60,12 @@ public class SiteMapParserBolt extends StatusEmitterBolt {
 
     private static final org.slf4j.Logger LOG = LoggerFactory.getLogger(SiteMapParserBolt.class);
 
-    private static final byte[] clue = Namespace.SITEMAP.getBytes(StandardCharsets.UTF_8);
-
     private SiteMapParser parser;
 
     private ParseFilter parseFilters;
     private int filterHoursSinceModified = -1;
 
-    private int maxOffsetGuess = 300;
+    private int maxOffsetGuess = 1000;
 
     private ReducedMetric averagedMetrics;
 
@@ -102,7 +84,7 @@ public class SiteMapParserBolt extends StatusEmitterBolt {
 
         LOG.debug("Processing {}", url);
 
-        boolean looksLikeSitemap = sniff(content);
+        boolean looksLikeSitemap = SitemapUtil.sniff(content, maxOffsetGuess);
         // can force the mimetype as we know it is XML
         if (looksLikeSitemap) {
             ct = "application/xml";
@@ -345,7 +327,7 @@ public class SiteMapParserBolt extends StatusEmitterBolt {
         filterHoursSinceModified =
                 ConfUtils.getInt(stormConf, "sitemap.filter.hours.since.modified", -1);
         parseFilters = ParseFilters.fromConf(stormConf);
-        maxOffsetGuess = ConfUtils.getInt(stormConf, "sitemap.offset.guess", 300);
+        maxOffsetGuess = ConfUtils.getInt(stormConf, "sitemap.offset.guess", 1000);
         averagedMetrics =
                 context.registerMetric(
                         "sitemap_average_processing_time",
@@ -368,18 +350,5 @@ public class SiteMapParserBolt extends StatusEmitterBolt {
     public void declareOutputFields(OutputFieldsDeclarer declarer) {
         super.declareOutputFields(declarer);
         declarer.declare(new Fields("url", "content", "metadata"));
-    }
-
-    /**
-     * Examines the first bytes of the content for a clue of whether this document is a sitemap,
-     * based on namespaces. Works for XML and non-compressed documents only.
-     */
-    private boolean sniff(byte[] content) {
-        byte[] beginning = content;
-        if (content.length > maxOffsetGuess && maxOffsetGuess > 0) {
-            beginning = Arrays.copyOfRange(content, 0, maxOffsetGuess);
-        }
-        int position = Bytes.indexOf(beginning, clue);
-        return position != -1;
     }
 }
